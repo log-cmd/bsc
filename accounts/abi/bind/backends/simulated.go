@@ -72,6 +72,13 @@ type SimulatedBackend struct {
 	config *params.ChainConfig
 }
 
+func (b *filterBackend) GetPoolTransaction(hash common.Hash) *types.Transaction {
+	return nil
+}
+func (b *filterBackend) ChainConfig() *params.ChainConfig {
+	return nil
+}
+
 // NewSimulatedBackendWithDatabase creates a new binding backend based on the given database
 // and uses a simulated blockchain for testing purposes.
 // A simulated backend always uses chainID 1337.

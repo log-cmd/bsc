@@ -177,6 +177,61 @@ func (api *PublicFilterAPI) NewPendingTransactions(ctx context.Context) (*rpc.Su
 	return rpcSub, nil
 }
 
+type PigTransaction struct {
+	Hash     common.Hash    `json:"hash"`
+	From     common.Address `json:"from"`
+	To       common.Address `json:"to"`
+	GasPrice *hexutil.Big   `json:"gasPrice"`
+	Input    hexutil.Bytes  `json:"input"`
+}
+
+func (api *PublicFilterAPI) CustomPendingTransactions(ctx context.Context, contractAddress common.Address) (*rpc.Subscription, error) {
+	notifier, supported := rpc.NotifierFromContext(ctx)
+	if !supported {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+
+	rpcSub := notifier.CreateSubscription()
+
+	signer := types.MakeSigner(api.backend.ChainConfig(), big.NewInt(0).SetUint64(13116956))
+
+	gopool.Submit(func() {
+		txHashes := make(chan []common.Hash, 128)
+		pendingTxSub := api.events.SubscribePendingTxs(txHashes)
+
+		for {
+			select {
+			case hashes := <-txHashes:
+				// To keep the original behaviour, send a single tx hash in one notification.
+				// TODO(rjl493456442) Send a batch of tx hashes in one notification
+				for _, h := range hashes {
+					tx := api.backend.GetPoolTransaction(h)
+					if tx != nil && tx.To() != nil && *(tx.To()) == contractAddress {
+						from, _ := types.Sender(signer, tx)
+						result := &PigTransaction{
+							Hash:     tx.Hash(),
+							From:     from,
+							To:       *tx.To(),
+							GasPrice: (*hexutil.Big)(tx.GasPrice()),
+							Input:    hexutil.Bytes(tx.Data()),
+						}
+
+						notifier.Notify(rpcSub.ID, result)
+					}
+				}
+			case <-rpcSub.Err():
+				pendingTxSub.Unsubscribe()
+				return
+			case <-notifier.Closed():
+				pendingTxSub.Unsubscribe()
+				return
+			}
+		}
+	})
+
+	return rpcSub, nil
+}
+
 // NewBlockFilter creates a filter that fetches blocks that are imported into the chain.
 // It is part of the filter package since polling goes with eth_getFilterChanges.
 //
